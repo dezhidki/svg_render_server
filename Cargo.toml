@@ -1,0 +1,16 @@
+[package]
+name = "svg_render_server"
+version = "0.1.0"
+authors = ["ghorsington <neigh@coder.horse>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+actix-web = "4.0.0-beta.6"
+serde = "1"
+serde_json = "1"
+chromiumoxide = { git = "https://github.com/mattsse/chromiumoxide", features = ["tokio-runtime"], default-features = false, branch = "main"}
+chromiumoxide_cdp = { git = "https://github.com/mattsse/chromiumoxide", path = "chromiumoxide_cdp", branch = "main"}
+tokio = "1"
+futures = "0.3.15"
