@@ -101,7 +101,12 @@ async fn test_page() -> HttpResponse {
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    let cfg = BrowserConfig::builder().build().unwrap();
+    let cfg = BrowserConfig::builder()
+        .arg("--disable-gpu")
+        .arg("--no-sandbox") // TODO: Run with seccop instead
+        .arg("--disable-setuid-sandbox")
+        .build()
+        .unwrap();
     println!("Starting Chrome");
     let (browser, mut handler) = Browser::launch(cfg).await.unwrap();
 
@@ -130,7 +135,7 @@ async fn main() -> std::io::Result<()> {
             .service(convert_file)
             .service(test_page)
     })
-        .bind("127.0.0.1:8080")?
+        .bind("0.0.0.0:8080")?
         .run()
         .await
 }

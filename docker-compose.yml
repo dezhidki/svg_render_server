@@ -1,0 +1,8 @@
+version: "3"
+
+services:
+  svg_render_server:
+    build: .
+    ports:
+      - "9089:8080"
+    restart: unless-stopped
