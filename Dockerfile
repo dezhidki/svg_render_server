@@ -11,7 +11,7 @@ RUN cargo fetch
 FROM base AS builder
 
 COPY src /code/src
-RUN cargo build --release
+RUN cargo build --release --jobs 1
 
 FROM rust:1-slim-buster
 
