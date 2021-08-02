@@ -1,24 +1,11 @@
-use actix_web::{Responder, get, post, HttpResponse, HttpServer, App, web, Result};
+use actix_multipart::Multipart;
+use actix_web::{get, post, HttpResponse, HttpServer, App, web, Result};
 use serde::Deserialize;
 use chromiumoxide::{Browser, BrowserConfig};
-use futures::{StreamExt, TryFutureExt};
-use futures::future::select;
-use futures::future::{Abortable, AbortHandle, Aborted};
+use futures::{StreamExt, TryStreamExt};
 use std::sync::Arc;
-use chromiumoxide_cdp::cdp::browser_protocol::emulation::{SetEmulatedMediaParams, SetDeviceMetricsOverrideParams};
+use chromiumoxide_cdp::cdp::browser_protocol::emulation::{SetEmulatedMediaParams};
 use chromiumoxide::cdp::browser_protocol::page::PrintToPdfParams;
-use std::path::Path;
-
-#[get("/")]
-async fn hello() -> impl Responder {
-    HttpResponse::Ok().body("Hello, world!")
-}
-
-#[derive(Deserialize)]
-struct RenderOptions {
-    to: String,
-    input: String,
-}
 
 #[derive(Deserialize)]
 struct VPSize {
@@ -30,7 +17,7 @@ struct AppState {
     browser: Arc<Browser>,
 }
 
-async fn get_html(input: &str, data: &web::Data<AppState>) -> Result<String, Box<dyn std::error::Error>> {
+async fn render_pdf(input: &str, data: &web::Data<AppState>) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     let browser = &data.browser;
     let page = browser.new_page("").await?;
 
@@ -58,7 +45,7 @@ async fn get_html(input: &str, data: &web::Data<AppState>) -> Result<String, Box
 
     println!("Printing with size {}, {}", size.width, size.height);
 
-    page.save_pdf(PrintToPdfParams::builder()
+    let pdf_data = page.pdf(PrintToPdfParams::builder()
         .paper_width(size.width / 96.0)
         .paper_height(size.height / 96.0)
         .page_ranges("1")
@@ -67,29 +54,49 @@ async fn get_html(input: &str, data: &web::Data<AppState>) -> Result<String, Box
         .margin_bottom(0)
         .margin_right(0)
         .prefer_css_page_size(false)
-        .build(),
-                  Path::new("./test.pdf")).await?;
+        .build()).await?;
 
-    println!("Done!");
-
-    let html = page.wait_for_navigation().await?.content().await?;
-
-    println!("Got HTML");
-
-    page.close().await?;
-    println!("Loop done");
-
-    Ok(html)
+    Ok(pdf_data)
 }
 
 #[post("/render")]
-async fn convert_file(opts: web::Json<RenderOptions>, data: web::Data<AppState>) -> Result<String> {
-    let result = get_html(&opts.input, &data).await;
+async fn convert_file(mut payload: Multipart, data: web::Data<AppState>) -> HttpResponse {
+    let field = match payload.try_next().await {
+        Ok(Some(f)) => f,
+        _ => return HttpResponse::BadRequest().body("Invalid file")
+    };
+
+    let chunks = field.map(|x| x.unwrap()).collect::<Vec<_>>().await;
+    let mut input = String::new();
+    for r in chunks {
+        input.push_str(std::str::from_utf8(r.as_ref()).unwrap());
+    }
+
+    let result = render_pdf(&input, &data).await;
 
     match result {
-        Ok(html) => Ok(html),
-        Err(err) => Ok(err.to_string())
+        Ok(data) => HttpResponse::Ok().content_type("application/pdf").body(data),
+        Err(err) => HttpResponse::InternalServerError().body(err.to_string())
     }
+}
+
+#[get("/test")]
+async fn test_page() -> HttpResponse {
+    let html = r#"<html>
+        <head><title>Upload Test</title></head>
+        <body>
+            <form action="/render" method="post" enctype="multipart/form-data">
+                <input type="file" name="file"/>
+                <button type="submit">Submit</button>
+            </form>
+            <p>Max size: 2MB</p>
+        </body>
+    </html>
+    "#;
+
+    HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body(html)
 }
 
 #[actix_web::main]
@@ -114,14 +121,14 @@ async fn main() -> std::io::Result<()> {
     HttpServer::new(move || {
         App::new()
             .app_data(
-                web::JsonConfig::default()
-                    .limit(1024 * 1024)
+                web::FormConfig::default()
+                    .limit(2 * 1024 * 1024)
             )
-            .data(AppState {
+            .app_data(web::Data::new(AppState {
                 browser: browser_arc.clone()
-            })
-            .service(hello)
+            }))
             .service(convert_file)
+            .service(test_page)
     })
         .bind("127.0.0.1:8080")?
         .run()
